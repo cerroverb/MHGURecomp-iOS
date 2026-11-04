@@ -25,7 +25,12 @@
     {SDL_SCANCODE_Q}, {SDL_SCANCODE_E}, {SDL_SCANCODE_TAB}, {SDL_SCANCODE_T}, {SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER}, \
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
     {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}, {KEY_WHEEL_UP}, {KEY_WHEEL_DOWN}}
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 1, 1, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 0, 1, BATTERY_OFF, ""
+#ifdef __APPLE__  // (iOS: the screen's own size)
+#define CONFIG_DEFAULT_SIZE 0, 0
+#else
+#define CONFIG_DEFAULT_SIZE 1920, 1080
+#endif
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, CONFIG_DEFAULT_SIZE, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 1, 1, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 0, 1, BATTERY_OFF, ""
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -44,7 +49,11 @@ static const char DEFAULT_INI[] =
     "Mode = Borderless\n"
     "\n"
     "; Resolution (WxH)\n"
+#ifdef __APPLE__
+    "Resolution = Desktop\n"
+#else
     "Resolution = 1920x1080\n"
+#endif
     "\n"
     "; Rendering resolution (WxH)\n"
     "; Higher = sharper (for supersampling)\n"
@@ -914,6 +923,14 @@ void config_load(void) {
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
     // (in pixels: on a scaled Wayland desktop, SDL's size is the logical one, 1280x800 at density 2 on a 2560x1600 screen)
     desktop_w = dm ? (int)lround(dm->w * dm->pixel_density) : 1920, desktop_h = dm ? (int)lround(dm->h * dm->pixel_density) : 1080;
+#ifdef __APPLE__
+    // (the game is always landscape, but an iPad that is locked or still upright says otherwise: the 3D picture and the
+    // HUD would be laid out for that shape, narrow, with black at the sides, until the next start)
+    if (desktop_h > desktop_w) {
+        int upright = desktop_w;
+        desktop_w = desktop_h, desktop_h = upright;
+    }
+#endif
     if (!g_config.width) g_config.width = desktop_w, g_config.height = desktop_h;
 
     const char *e = getenv("MHGU_WINDOW");
@@ -946,12 +963,18 @@ void config_load(void) {
     if (g_config.display_mode == DISPLAY_BORDERLESS) tw = tw < desktop_w ? tw : desktop_w, th = th < desktop_h ? th : desktop_h;
     // The picture's shape: the window's or AspectRatio's, at least 16:10. The game lays its HUD out for 16:9, which
     // still fits down to 16:10 (a little flatter, nvn/vulkan/exec.c), so a narrower window (4:3) shows 16:10 with bars.
+    // iOS: down to 5:4, an iPad's 4:3 screen filled.
     // Wider than 16:9 shows more to the sides, 16:9 to 16:10 more above and below (camera_fovy, gen.py PATCHES).
     float aspect = g_config.aspect_ratio > 0 ? g_config.aspect_ratio : (float)tw / (float)th;
-    if (aspect < 1.6f - 0.005f) {
+#ifdef __APPLE__
+    const float narrowest = 1.25f;
+#else
+    const float narrowest = 1.6f;
+#endif
+    if (aspect < narrowest - 0.005f) {
         if (g_config.aspect_ratio > 0)
-            LOG("[config] AspectRatio %.3f is narrower than 16:10, which the HUD needs: using 16:10\n", aspect);
-        aspect = 1.6f;
+            LOG("[config] AspectRatio %.3f is narrower than the HUD allows: using %.2f\n", aspect, narrowest);
+        aspect = narrowest;
     }
     if (fabsf(aspect - 16.0f / 9.0f) < 0.01f) aspect = 16.0f / 9.0f;  // (1366x768 and the like)
     if (render_auto && g_config.fsr && g_config.display_mode == DISPLAY_BORDERLESS && (tw < desktop_w || th < desktop_h)) {
