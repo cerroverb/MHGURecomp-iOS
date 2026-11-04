@@ -1,6 +1,6 @@
 name: Build iOS IPA
 
-# Runs on branch build: the runtime of branch ipad + generated/ (the translated game code, in this private repo only).
+# Needs generated/ from your own dump (make gen): none is in this repository.
 on:
   push:
     branches: [ build ]
