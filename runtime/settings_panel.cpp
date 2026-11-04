@@ -1157,7 +1157,7 @@ std::vector<Row> main_rows() {
              !*c.ldn_server ? std::string(tr("Default")) + (*LDN_DEFAULT_SERVER ? " (" LDN_DEFAULT_SERVER ")" : "")
                             : c.ldn_server,
              ini("Server"));
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__APPLE__)
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public (Android players only)"), ini("Key"));
 #else
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
