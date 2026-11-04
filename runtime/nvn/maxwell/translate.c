@@ -1679,6 +1679,10 @@ static void glsl_rewrite(Ctx *c, Str *o, const char *src) {
         {"ulong", "uint64_t"}, {"rsqrt", "inversesqrt"}, {"rint", "roundEven"}, {"front_facing", "gl_FrontFacing"},
         {"point_coord", "gl_PointCoord"}, {"lane", "gl_SubgroupInvocationID"}, {"vid", "uint(gl_VertexIndex)"},
         {"iid", "uint(gl_InstanceIndex)"},
+        // (prelude helpers under their own names: MoltenVK's SPIRV-Cross keeps function names, and a GLSL fmin / fmax
+        // next to Metal's own is an ambiguous call there)
+        {"fmin", "nv_fmin"}, {"fmax", "nv_fmax"}, {"saturate", "nv_saturate"}, {"clz", "nv_clz"},
+        {"popcount", "nv_popcount"}, {"mulhi", "nv_mulhi"},
     };
     const char *p = src;
     while (*p) {
@@ -1777,14 +1781,14 @@ static const char glsl_prelude[] =
     "int sx16(uint v) { return bitfieldExtract(int(v), 0, 16); }\n"
     "int sx16(int v) { return bitfieldExtract(v, 0, 16); }\n"
     // MSL semantics: saturate(NaN) = 0, fmin/fmax return the non-NaN operand
-    "float saturate(float x) { return isnan(x) ? 0.0f : clamp(x, 0.0f, 1.0f); }\n"
-    "vec2 saturate(vec2 x) { return vec2(saturate(x.x), saturate(x.y)); }\n"
-    "float fmin(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : min(a, b)); }\n"
-    "float fmax(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : max(a, b)); }\n"
-    "uint clz(uint v) { return v == 0u ? 32u : uint(31 - findMSB(v)); }\n"
-    "uint popcount(uint v) { return uint(bitCount(v)); }\n"
-    "uint mulhi(uint a, uint b) { uint hi, lo; umulExtended(a, b, hi, lo); return hi; }\n"
-    "int mulhi(int a, int b) { int hi, lo; imulExtended(a, b, hi, lo); return hi; }\n"
+    "float nv_saturate(float x) { return isnan(x) ? 0.0f : clamp(x, 0.0f, 1.0f); }\n"
+    "vec2 nv_saturate(vec2 x) { return vec2(nv_saturate(x.x), nv_saturate(x.y)); }\n"
+    "float nv_fmin(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : min(a, b)); }\n"
+    "float nv_fmax(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : max(a, b)); }\n"
+    "uint nv_clz(uint v) { return v == 0u ? 32u : uint(31 - findMSB(v)); }\n"
+    "uint nv_popcount(uint v) { return uint(bitCount(v)); }\n"
+    "uint nv_mulhi(uint a, uint b) { uint hi, lo; umulExtended(a, b, hi, lo); return hi; }\n"
+    "int nv_mulhi(int a, int b) { int hi, lo; imulExtended(a, b, hi, lo); return hi; }\n"
     "uint bfe_u(uint v, uint ctl) { uint pos = ctl & 0xFFu, len = (ctl >> 8) & 0xFFu; if (len == 0u) return 0u; if (pos >= 32u) return 0u; return bitfieldExtract(v, int(pos), int(min(len, 32u - pos))); }\n"
     "uint bfe_s(uint v, uint ctl) { uint pos = ctl & 0xFFu, len = (ctl >> 8) & 0xFFu; if (len == 0u) return 0u; if (pos >= 32u) return (int(v) < 0) ? 0xFFFFFFFFu : 0u; return uint(bitfieldExtract(int(v), int(pos), int(min(len, 32u - pos)))); }\n"
     "uint bfi(uint ins, uint ctl, uint base) { uint pos = ctl & 0xFFu, len = (ctl >> 8) & 0xFFu; if (len == 0u || pos >= 32u) return base; return bitfieldInsert(base, ins, int(pos), int(min(len, 32u - pos))); }\n"

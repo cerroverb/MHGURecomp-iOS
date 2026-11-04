@@ -35,7 +35,7 @@ enum { FULL_SCREEN_EXCLUSIVE_DISALLOWED = 2 };  // VK_FULL_SCREEN_EXCLUSIVE_DISA
 static bool surface_caps2, no_exclusive;  // VK_KHR_get_surface_capabilities2 (instance), VK_EXT_full_screen_exclusive
 
 static pthread_mutex_t g_vk_mutex = PTHREAD_MUTEX_INITIALIZER;
-static volatile bool g_vk_owner;  // who holds it: exit() may run inside a submission, from the guest's own code
+static pthread_t volatile g_vk_owner;  // who holds it: exit() may run inside a submission, from the guest's own code
 static volatile bool exiting;     // exit() has begun: the driver's own teardown may be one step away
 static pthread_t vk_exit_thread;  // the thread running exit(): it may still enter here (the atexit handler drains)
 
@@ -68,6 +68,11 @@ static void disable_overwolf_layers(void) {
     static const char *const vars[] = {"DISABLE_VULKAN_OW_OVERLAY_LAYER", "DISABLE_VULKAN_OW_OBS_CAPTURE"};
     for (size_t i = 0; i < sizeof vars / sizeof *vars; i++)
         if (!getenv(vars[i])) SDL_setenv_unsafe(vars[i], "1", 0);
+#ifdef __APPLE__
+    // Disable Metal residency sets in MoltenVK to ensure rock-solid stability on iOS 18 / Apple Silicon M2
+    if (!getenv("MVK_CONFIG_RESIDENCY_SETS")) SDL_setenv_unsafe("MVK_CONFIG_RESIDENCY_SETS", "0", 0);
+    if (!getenv("MVK_CONFIG_USE_MTLRESIDENCYSETS")) SDL_setenv_unsafe("MVK_CONFIG_USE_MTLRESIDENCYSETS", "0", 0);
+#endif
 }
 
 static void create_instance(void) {
@@ -82,9 +87,16 @@ static void create_instance(void) {
     vkEnumerateInstanceExtensionProperties(NULL, &ni, NULL);
     VkExtensionProperties *ip = calloc(ni ? ni : 1, sizeof *ip);
     vkEnumerateInstanceExtensionProperties(NULL, &ni, ip);
-    for (uint32_t i = 0; i < ni; i++)
+    bool portability_enum = false;
+    for (uint32_t i = 0; i < ni; i++) {
         if (!strcmp(ip[i].extensionName, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME)) surface_caps2 = true;
+#ifdef __APPLE__
+        // MoltenVK is a "portability" driver: a loader lists it only for an instance that asks for those.
+        if (!strcmp(ip[i].extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) portability_enum = true;
+#endif
+    }
     free(ip);
+    if (portability_enum) ext[n_ext++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
     if (surface_caps2) ext[n_ext++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
     bool validate = getenv("MHGU_VK_VALIDATION") != NULL;
     if (validate) ext[n_ext++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
@@ -95,6 +107,9 @@ static void create_instance(void) {
     VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app,
                                .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext,
                                .enabledLayerCount = validate ? 1 : 0, .ppEnabledLayerNames = layers};
+#ifdef __APPLE__
+    if (portability_enum) ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
     VkResult r = vkCreateInstance(&ci, NULL, &g_vk.inst);
     if (r != VK_SUCCESS && validate) {
         LOG("[vk] validation layer unavailable (%d); continuing without\n", r);
@@ -188,6 +203,9 @@ static void create_device(void) {
     if (g_vk.divisor) ext[n_ext++] = VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME;
     g_vk.stencil_export = has_ext(ep, ne, VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);  // (MSAA stencil resolve)
     if (g_vk.stencil_export) ext[n_ext++] = VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME;
+    // A device that advertises VK_KHR_portability_subset (MoltenVK) must have it enabled.
+    g_vk.portability = has_ext(ep, ne, "VK_KHR_portability_subset");
+    if (g_vk.portability) ext[n_ext++] = "VK_KHR_portability_subset";
     no_exclusive = surface_caps2 && has_ext(ep, ne, "VK_EXT_full_screen_exclusive") && !getenv("MHGU_VK_EXCLUSIVE");
     if (no_exclusive) ext[n_ext++] = "VK_EXT_full_screen_exclusive";
     if (g_vk.api11) {  // (Vulkan 1.2 has it as the feature samplerMirrorClampToEdge)
@@ -299,10 +317,14 @@ static void create_device(void) {
                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = g_vk.qfam};
     VK_CHECK(vkCreateCommandPool(g_vk.dev, &pi, NULL, &g_vk.pool));
 
-    // pipeline cache: cache/vk_pipelines.bin (written at exit)
+    // pipeline cache: cache/vk_pipelines.bin (written at exit). Not under MoltenVK: it compiles every shader of a
+    // pipeline cache's initial data into a Metal library in vkCreatePipelineCache, one after the other, and a 200 MB
+    // cache held the first frame back for minutes.
     size_t sz = 0;
     void *data = NULL;
-    FILE *fp = fopen("cache/vk_pipelines.bin", "rb");
+    if (g_vk.portability && remove("cache/vk_pipelines.bin") == 0)
+        LOG("[vk] cache/vk_pipelines.bin removed: MoltenVK compiled all of it before the first frame\n");
+    FILE *fp = g_vk.portability ? NULL : fopen("cache/vk_pipelines.bin", "rb");
     if (fp) {
         fseek(fp, 0, SEEK_END);
         sz = (size_t)ftell(fp);
@@ -320,6 +342,7 @@ static void create_device(void) {
 }
 
 static void pipeline_cache_save(void) {
+    if (g_vk.portability) return;  // (create_device: no file under MoltenVK)
     size_t sz = 0;
     if (vkGetPipelineCacheData(g_vk.dev, g_vk.pcache, &sz, NULL) != VK_SUCCESS || !sz) return;
     void *data = malloc(sz);
@@ -407,13 +430,20 @@ static void create_swapchain(void) {
         ext = (VkExtent2D){ext.height, ext.width};
     LOG("[vk] window %dx%d, screen turned %#x\n", w, h, caps.currentTransform);
 #endif
+    VkCompositeAlphaFlagBitsKHR composite = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    if (!(caps.supportedCompositeAlpha & composite)) {
+        if (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR)
+            composite = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+        else if (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
+            composite = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+    }
     VkSwapchainKHR old = g_vk.swapchain;
     VkSwapchainCreateInfoKHR ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, .surface = g_vk.surface, .minImageCount = count,
         .imageFormat = sf.format, .imageColorSpace = sf.colorSpace, .imageExtent = ext, .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE, .preTransform = xf,
-        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, .presentMode = present_mode(), .clipped = VK_TRUE,
+        .compositeAlpha = composite, .presentMode = present_mode(), .clipped = VK_TRUE,
         .oldSwapchain = old};
     FullScreenExclusiveInfo fse = {.sType = VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT,
                                    .fullScreenExclusive = FULL_SCREEN_EXCLUSIVE_DISALLOWED};
@@ -710,13 +740,26 @@ static void exit_handler(void) {
     _exit(0);
 }
 
+// The window's Vulkan surface. On Apple's systems it is a Metal view + CAMetalLayer that SDL adds to the window, which
+// UIKit only takes from the main thread. The main thread is in ui_run's event loop, which runs it.
+static bool surface_ok;
+static void create_surface(void *unused) {
+    (void)unused;
+    surface_ok = SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface);
+}
+
 void backend_init(void) {
     static bool done;
     if (done) return;
     done = true;
     if (!ui_window()) FATAL("no window\n");
     create_instance();
-    if (!SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface)) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
+#ifdef __APPLE__
+    if (!SDL_RunOnMainThread(create_surface, NULL, true)) FATAL("SDL_RunOnMainThread: %s\n", SDL_GetError());
+#else
+    create_surface(NULL);
+#endif
+    if (!surface_ok) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
     pick_device();
     create_device();
     vk_exec_init();
