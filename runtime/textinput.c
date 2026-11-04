@@ -134,7 +134,13 @@ bool textinput_event(const SDL_Event *e) {
 }
 
 void textinput_update(void) {
+#ifdef __APPLE__
+    // On iOS, only pop up the virtual on-screen keyboard when the game actively requests text (e.g. character creation)
+    // Opening the Forge overlay GUI must NOT pop up the iOS software keyboard!
+    bool want = textinput_active();
+#else
     bool want = textinput_active() || overlay_menu_open();  // (Forge's menu takes typed text too)
+#endif
     SDL_Window *w = ui_window();
     if (!w) return;
 #ifdef __ANDROID__

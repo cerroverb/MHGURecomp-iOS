@@ -14,8 +14,22 @@
 
 static const GameLibTables *g_tables;
 
+#ifdef __APPLE__
+extern const GameLibTables *mhgugame_tables(void) __attribute__((weak));  // (STATIC_GAMELIB: linked into the executable)
+#endif
+
 bool gamelib_load(char *why, size_t why_size) {
     if (g_tables) return true;
+#ifdef __APPLE__
+    if (mhgugame_tables) {
+        const GameLibTables *t = mhgugame_tables();
+        if (t && t->abi == GAMELIB_ABI && t->id && !strcmp(t->id, GAMELIB_ID)) {
+            g_tables = t;
+            LOG("[gamelib] statically linked (%u + %u functions)\n", *t->main_count, *t->sdk_count);
+            return true;
+        }
+    }
+#endif
     char path[1100];
     const char *env = getenv("MHGU_GAME_LIB");
     if (env && *env) {

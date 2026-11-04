@@ -11,6 +11,10 @@
 
 #include "../hle.h"
 #include "../textinput.h"
+
+#ifdef __APPLE__
+int plat_ios_text_input(const char *title, const char *sub, const char *guide, const char *initial, int max_chars, char *out, int out_cap);
+#endif
 #include "chat.h"
 
 // nn::swkbd::ShowKeyboard(String *out, const ShowKeyboardArg &) -> Result. String = {void *ptr; size_t size}.
@@ -18,6 +22,12 @@ HLE_FUNC("_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE", swk
     uint32_t ptr = LD32(ARG(0)), size = LD32(ARG(0) + 4);
     const char *name = getenv("MHGU_NAME");
     if (!name || !*name) name = "Hunter";
+#ifdef __APPLE__
+    char typed[256];
+    if ((!getenv("MHGU_NAME") || !*getenv("MHGU_NAME")) &&
+        plat_ios_text_input("Hunter Name", "Type your character name:", "Hunter", "Hunter", 16, typed, sizeof typed) > 0 && typed[0])
+        name = typed;
+#endif
     if (ptr && size) {
         memset(G2H(ptr), 0, size);
         snprintf((char *)G2H(ptr), size, "%s", name);
@@ -72,6 +82,9 @@ static void callback(Cpu *c, uint32_t fn, uint32_t arg) {
 // Calc returns the keyboard's state (as the applet reports it): 0 not initialized, 1 ready and hidden, 3 shown. The
 // game's keyboard driver waits for 1 after a text entry (its "closed" step).
 static int ik_state;
+#ifdef __APPLE__
+static int ik_ticks;
+#endif
 static char ik_initial[ARG_TEXT_MAX + 4];
 static int ik_auto;  // MHGU_NAME / MHGU_INLINE_CANCEL: answered on the second Calc after Appear
 HLE_FUNC("_ZN2nn5swkbd14InlineKeyboard4CalcEv", ik_calc) {
@@ -85,6 +98,29 @@ HLE_FUNC("_ZN2nn5swkbd14InlineKeyboard4CalcEv", ik_calc) {
         else callback(c, cb_enter, cb_arg(name ? name : "Hunter", (int)strlen(name ? name : "Hunter")));
         ik_auto = 0;
         ik_state = 1;
+#ifdef __APPLE__
+    // iOS: the system's text box, on the game's thread until it is answered. In MHGU's state machine (f_a62570), Appear
+    // moves state 6 -> state 7, and only a Calc returning 3 moves it to state 8 ("shown, waiting for enter"): 2 ticks
+    // of 3 first, or a state 1 here leaves it in state 7 forever (dimmed screen).
+    } else if (ik_state == 3 && !ik_auto) {
+        if (++ik_ticks > 2) {
+            static char text[ARG_TEXT_MAX + 4];
+            int r = plat_ios_text_input("Hunter Name", "Type your character name:", "Hunter",
+                                        ik_initial[0] ? ik_initial : "Hunter", 16, text, sizeof text);
+            textinput_end();
+            if (r > 0 && text[0]) {
+                int chars = 0;
+                for (const char *s = text; *s; s++) chars += ((unsigned char)*s & 0xC0) != 0x80;
+                LOG("[swkbd] entered \"%s\"\n", text);
+                callback(c, cb_enter, cb_arg(text, chars));
+            } else {
+                LOG("[swkbd] text entry cancelled\n");
+                callback(c, cb_cancel, 0);
+            }
+            ik_state = 1;
+        }
+    }
+#else
     } else if (ik_state == 3 && !ik_auto) {
         static char text[ARG_TEXT_MAX + 4];
         int chars, ev = textinput_poll(text, sizeof text, &chars);
@@ -104,6 +140,7 @@ HLE_FUNC("_ZN2nn5swkbd14InlineKeyboard4CalcEv", ik_calc) {
             ik_state = 1;
         }
     }
+#endif
     memcpy(c->r, saved, sizeof saved);
     RET(ik_state);
 }
@@ -117,9 +154,14 @@ HLE_FUNC("_ZN2nn5swkbd14InlineKeyboard6AppearERKNS0_9AppearArgE", ik_appear) {
     for (int i = 0; i < 0x30; i++) snprintf(hex + 3 * i, 4, " %02x", LD8(a + (uint32_t)i));
     LOG("[swkbd] inline keyboard shown (frame %llu), AppearArg%s\n", (unsigned long long)g_present_count, hex);
     ik_state = 3;
+#ifdef __APPLE__
+    ik_ticks = 0;
+#endif
     chat_close();  // (the game's own entry takes the keyboard)
     ik_auto = getenv("MHGU_NAME") || getenv("MHGU_INLINE_CANCEL") ? 1 : 0;
+#ifndef __APPLE__  // (iOS: the system's text box, from Calc)
     if (!ik_auto) textinput_begin(ik_initial, max);
+#endif
 }
 HLE_FUNC("_ZN2nn5swkbd14InlineKeyboard9DisappearEv", ik_disappear) {
     if (ik_state == 3) LOG("[swkbd] inline keyboard closed by the game\n");

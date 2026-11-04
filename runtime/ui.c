@@ -49,6 +49,12 @@ int ui_take_picked_folder(char *out, size_t size) {
 }
 bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
 static bool restart_application(void) {
+#ifdef __APPLE__
+    // No process of our own here either, and no way to launch one: the settings are already saved, so leaving is the
+    // restart - the player opens the app again for them.
+    LOG("[ui] restart: the settings are saved; close and reopen the app for them\n");
+    return true;
+#endif
     char exe[4096], wait[80];
     if (!plat_exe_path(exe, sizeof exe)) return false;
     const char **args = calloc((size_t)launch_argc + 3, sizeof *args);
@@ -100,6 +106,10 @@ static void fit_desktop(int *w, int *h) {
 // windowed. The cursor only shows in a window, or over a menu or the chat box (they show it only as they open, so it
 // stays shown when full screen comes while one is open: F11, Alt+Enter).
 static void set_fullscreen(bool on) {
+#ifdef __APPLE__
+    (void)on;  // On iOS the SDL window fills the UIWindow/screen natively. Mode switching is not supported.
+    return;
+#endif
     bool was = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
     if (on && !was) SDL_GetWindowSize(window, &win_w, &win_h);
     if (on && g_config.display_mode == DISPLAY_FULLSCREEN) {
@@ -128,7 +138,7 @@ static void set_fullscreen(bool on) {
 
 // The window's icon. Windows takes it from the exe (extras/icon/mhgurecomp.rc) and Android from the launcher icon, so only
 // Linux sets one: extras/icon/mhgurecomp-128.png, built into the program (the path is relative to the repo, where make runs).
-#if !defined(_WIN32) && !defined(__ANDROID__)
+#if !defined(_WIN32) && !defined(__ANDROID__) && !defined(__APPLE__)
 __asm__(".pushsection .rodata\n.globl mhgu_icon_png\nmhgu_icon_png:\n.incbin \"extras/icon/mhgurecomp-128.png\"\n"
         ".globl mhgu_icon_png_end\nmhgu_icon_png_end:\n.popsection");
 extern const unsigned char mhgu_icon_png[], mhgu_icon_png_end[];
@@ -230,7 +240,24 @@ static void set_window_icon(void) {
 static void set_window_icon(void) {}
 #endif
 
+#ifdef __APPLE__
+// iOS: the app to the background (or back): no frames meanwhile (the renderer, ui_window_away), as the system kills an
+// app that draws in the background (an event watch: acted on before the call returns).
+static bool ios_lifecycle(void *ud, SDL_Event *e) {
+    (void)ud;
+    if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) SDL_SetAtomicInt(&away, 1);
+    else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) SDL_SetAtomicInt(&away, 0);
+    return true;
+}
+#endif
+
 void ui_init(void) {
+#ifdef __APPLE__
+    // Touches are not mouse clicks here (a click is X / A and the mouse turns the camera: host_input.c), and the
+    // window is the screen, in landscape.
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO)) FATAL("SDL_Init: %s\n", SDL_GetError());
     int sdl = SDL_GetVersion();
 #ifdef MHGU_SDL_BUNDLED
@@ -265,10 +292,22 @@ void ui_init(void) {
     // (a resizable window may turn any way on Android, whatever the manifest says: landscape only. The window
     // fills the screen there, so the settings' size does not apply.)
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#elif defined(__APPLE__)
+    // On iOS/iPadOS, query the screen display mode directly to get full display size in points
+    const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+    if (!dm) dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    if (dm && dm->w > 0 && dm->h > 0) {
+        win_w = dm->w;
+        win_h = dm->h;
+    }
 #else
     fit_desktop(&win_w, &win_h);
 #endif
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#ifdef __APPLE__
+    // On iOS, force borderless fullscreen so the view fills the entire iPad screen natively
+    flags |= SDL_WINDOW_BORDERLESS | SDL_WINDOW_FULLSCREEN;
+#endif
 #ifndef MHGU_NULL_BACKEND
     flags |= SDL_WINDOW_VULKAN;
 #endif
@@ -277,6 +316,9 @@ void ui_init(void) {
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
     set_window_icon();
     if (g_config.display_mode != DISPLAY_WINDOWED) set_fullscreen(true);
+#ifdef __APPLE__
+    SDL_AddEventWatch(ios_lifecycle, NULL);
+#endif
 }
 
 // Alt+Enter: windowed <-> the full-screen mode of the settings (Windowed in the settings: borderless).

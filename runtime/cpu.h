@@ -11,6 +11,9 @@
 #ifdef __ANDROID__
 #define GUEST_BASE 0x1000000000ull   // 64 GB: most Android kernels give a process 512 GB (39-bit addresses), and map
                                      // its libraries and heap near the top of that
+#elif defined(__APPLE__)
+extern uintptr_t g_guest_base;       // iOS: wherever the system gave the 4 GB (runtime/platform/darwin.c): an app can't
+#define GUEST_BASE g_guest_base      // ask for a fixed place
 #else
 #define GUEST_BASE 0x10000000000ull  // 1 TB: claimed at startup (runtime/main.c)
 #endif

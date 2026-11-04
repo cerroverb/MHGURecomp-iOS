@@ -16,8 +16,12 @@
 #include "mods.h"
 #include "app_actions.h"
 #include "net/discord.h"
-#ifdef __ANDROID__
-#include <SDL3/SDL_main.h>  // (main becomes SDL_main, which SDL's Java activity calls in libmain.so)
+#if defined(__ANDROID__) || defined(__APPLE__)
+#include <SDL3/SDL_main.h>  // (main becomes SDL_main, which SDL's Java activity calls in libmain.so; iOS: its UIKit app)
+#endif
+#ifdef __APPLE__
+#include <unistd.h>
+void plat_show_missing_files_screen(const char *main_path, const char *doc_path);  // (runtime/platform/darwin.c)
 #endif
 
 #ifndef MHGU_VERSION
@@ -29,6 +33,9 @@ const char *g_game_dir = "game";  // folder holding exefs/ and romfs/ (the playe
 // where the player puts the game files, for the messages below
 #ifdef __ANDROID__
 #define DATA_FOLDER "Android/data/io.github.morerokk.mhgurecomp/files/data on this device"
+#define DATA_SUB(s) "data/" s
+#elif defined(__APPLE__)
+#define DATA_FOLDER "the data folder of MHGU Recomp in the Files app"
 #define DATA_SUB(s) "data/" s
 #else
 #define DATA_FOLDER "the data folder next to mhgurecomp.exe"
@@ -53,10 +60,17 @@ static void rtld_init_main(Cpu *c) {  // (then the mods' subsdks, in the order r
     for (int i = 2; i < g_nexefs; i++) module_init(c, &g_modules[i]);
 }
 
-// Claim the guest window before anything else can map there.
-__attribute__((constructor(101))) static void reserve_guest_space(void) {
+// Claim the guest window before anything else can map there. (iOS: from main, past the log's set-up: the system picks the
+// place, and a message box can say what failed.)
+#ifndef __APPLE__
+__attribute__((constructor(101)))
+#endif
+static void reserve_guest_space(void) {
     if (plat_reserve_guest(GUEST_BASE, GUEST_SPACE)) return;
-    fprintf(stderr, "FATAL: the guest address window at %llx is not free\n", GUEST_BASE);
+    fprintf(stderr, "FATAL: the guest address window at %llx is not free\n", (unsigned long long)GUEST_BASE);
+#ifdef __APPLE__
+    plat_error_box("FATAL: Failed to reserve 4 GB guest virtual address space. Check log.txt in Files > MHGU Recomp.");
+#endif
     exit(1);
 }
 
@@ -207,6 +221,10 @@ int main(int argc, char **argv) {
         }
     }
     ui_capture_launch_args(argc, argv);
+#ifdef __APPLE__
+    plat_standalone();
+    reserve_guest_space();
+#endif
     plat_init();
     setvbuf(stderr, NULL, _IONBF, 0);
     bool given = false;
@@ -225,6 +243,13 @@ int main(int argc, char **argv) {
 #ifdef __ANDROID__
         android_game_folder(data, sizeof data);  // ([Android] GameFolder: the game files on a USB drive, an SD card...)
 #endif
+#ifdef __APPLE__
+        char doc[1024] = {0};
+        if (plat_user_dir(doc, sizeof doc)) {  // (SDL's app delegate went to the app's resources)
+            snprintf(data, sizeof data, "%s/data", doc);
+            if (chdir(doc) != 0) { /* the folder we are in will do */ }
+        }
+#endif
         // (MHGU_DATA_DIR: the game files elsewhere, also on a PC; on Android from env.txt)
         if (getenv("MHGU_DATA_DIR")) snprintf(data, sizeof data, "%s", getenv("MHGU_DATA_DIR"));
         g_game_dir = data;
@@ -237,6 +262,11 @@ int main(int argc, char **argv) {
         } else {
             fprintf(stderr, "[main] no user data folder: saves go to save\\ beside the executable\n");
         }
+#ifdef __APPLE__
+        char main_path[1200];
+        snprintf(main_path, sizeof main_path, "%s/exefs/main", data);
+        if (access(main_path, R_OK) != 0) plat_show_missing_files_screen(main_path, doc[0] ? doc : NULL);
+#endif
         for (char msg[900]; game_files_problem(data, msg, sizeof msg);) {
             fprintf(stderr, "%s\n", msg);
 #ifdef __ANDROID__
