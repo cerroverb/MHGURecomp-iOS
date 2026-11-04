@@ -6,9 +6,12 @@
 #                                                   DLLs and the game files (build/data): start build/mhgurecomp.exe
 # build/ holds only the game folder (what a player copies); the compiler's files go to obj/.
 #   make PLATFORM=android ABI=arm64-v8a|x86_64      the Android APK instead (android/android.mk): build-android/
+#   make (on a Mac, with DEPS=<prebuilt iOS libraries>)   build/MHGURecomp for iOS / iPadOS, game code linked in (ios/)
 UNAME := $(shell uname -s)
 ifneq ($(filter MINGW% MSYS% CYGWIN% Windows_NT,$(UNAME) $(OS)),)
 PLATFORM := windows
+else ifeq ($(UNAME),Darwin)
+PLATFORM := darwin
 else
 PLATFORM := linux
 endif
@@ -22,7 +25,7 @@ O        ?= $(if $(ANDROID),obj-android/$(ABI),obj)
 CC       := clang
 CXX      := clang++
 # AVX2 + FMA (Haswell or newer); Android: the ABI's baseline (arm64-v8a: ARMv8.0, x86_64: SSE4.2)
-GENARCH  ?= $(if $(ANDROID),,-march=x86-64-v3)
+GENARCH  ?= $(if $(ANDROID)$(filter darwin,$(PLATFORM)),,-march=x86-64-v3)
 GENFLAGS := -O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label \
             -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime $(GENARCH)
 
@@ -41,7 +44,7 @@ RT_HDRS  := $(wildcard runtime/*.h) $(wildcard runtime/net/*.h) $(wildcard runti
 # use: MP4 holding H.264 video and AAC audio. Nothing to install or ship (Linux distributions carry different FFmpeg
 # versions, and an executable linked to one doesn't start with another), and no GPL parts: FFmpeg's LGPL 2.1 only.
 # FFMPEG=system links the system's own avformat / avcodec / avutil instead.
-FFMPEG        ?= bundled
+FFMPEG        ?= $(if $(filter darwin,$(PLATFORM)),system,bundled)
 FFMPEG_VER    := 9.0.2
 FFMPEG_SHA256 := 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
 FFMPEG_TAR    := third_party/ffmpeg/ffmpeg-$(FFMPEG_VER).tar.xz
@@ -68,8 +71,8 @@ endif
 # than GLIBC_MAX. SDL still loads X11, Wayland, libdecor, PipeWire / PulseAudio / ALSA, udev... from the system when
 # it runs, as its shared library does. Needs cmake. SDL3=system / SHADERC=system link the system's libSDL3.so.0 /
 # libshaderc_shared.so.1 instead. (Windows: always MSYS2's, their DLLs bundled.)
-SDL3          ?= $(if $(filter windows,$(PLATFORM)),system,bundled)
-SHADERC       ?= $(if $(filter windows,$(PLATFORM)),system,bundled)
+SDL3          ?= $(if $(filter windows darwin,$(PLATFORM)),system,bundled)
+SHADERC       ?= $(if $(filter windows darwin,$(PLATFORM)),system,bundled)
 SDL3_VER      := 3.4.18
 SDL3_SHA256   := 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3
 SDL3_TAR      := third_party/sdl3/SDL3-$(SDL3_VER).tar.gz
@@ -131,6 +134,28 @@ ICON_RES := $(O)/icon.res.o
 UPD_ICON_RES := $(O)/updater-icon.res.o
 else ifeq ($(PLATFORM),android)
 include android/android.mk
+else ifeq ($(PLATFORM),darwin)
+# iOS / iPadOS: SDL3, shaderc, FFmpeg and MoltenVK prebuilt for it in $(DEPS) (.github/workflows/build-ios.yml). An app
+# can't load a library of its own, so the game code is linked into the executable (STATIC_GAMELIB).
+DEPS     ?= deps
+SDKROOT  ?= $(shell xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)
+ARCH_FLAGS ?= -target arm64-apple-ios15.0 -isysroot $(SDKROOT)
+CC       := xcrun --sdk iphoneos clang $(ARCH_FLAGS)
+CXX      := xcrun --sdk iphoneos clang++ -std=gnu++17 $(ARCH_FLAGS)
+GENFLAGS += -fPIC
+OSFLAGS  :=
+LIB_INC  := -I$(DEPS)/include
+EXE      := $(B)/MHGURecomp
+STATIC_GAMELIB ?= 1
+FRAMEWORKS := -framework UIKit -framework Metal -framework QuartzCore -framework Foundation \
+              -framework CoreGraphics -framework AudioToolbox -framework CoreAudio \
+              -framework GameController -framework CoreHaptics -framework IOKit \
+              -framework IOSurface -framework CoreVideo -framework CoreMedia \
+              -framework AVFoundation -framework CoreBluetooth -framework CoreMotion \
+              -framework OpenGLES -framework UniformTypeIdentifiers
+LDFLAGS  := $(ARCH_FLAGS) -L$(DEPS)/lib -lSDL3 $(AV_LIBS) -lMoltenVK -lshaderc_combined $(FRAMEWORKS) -lc++
+GAMELIB  := $(B)/mhgugame.dylib
+GAMELIB_LDFLAGS := -shared $(ARCH_FLAGS)
 else
 EXE      := $(B)/mhgurecomp
 OSFLAGS  :=
@@ -159,11 +184,11 @@ endif
 # GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
                 runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
-GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cut -c1-16)
+GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-16)
 # SHADER_ID: the shader translator, whose output cache/programs.bin keeps (runtime/nvn/vulkan/exec.c): the cache stays
 # valid across builds until the translator changes. (Line endings ignored: the same sources hash the same everywhere.)
 SHADER_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
-SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
+SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-16)
 # VERSION: this build's release (git describe: 0.10.3 on a release's tag, 0.10.3-4-gabc1234 after it), in the log and
 # the updater's (updater/updater.c: only a build of exactly a release updates itself). make dist VERSION=0.10.4 for a
 # release built before its tag is made.
@@ -214,8 +239,8 @@ else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
-all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) \
-     $(if $(ANDROID),apk,data licenses pipelist)
+all: $(EXE) $(if $(filter-out 1,$(STATIC_GAMELIB)),$(if $(GEN_SRC),$(GAMELIB))) $(UPDATER) \
+     $(if $(filter windows,$(PLATFORM)),bundle) $(if $(ANDROID),apk,$(if $(filter darwin,$(PLATFORM)),,data licenses pipelist))
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
@@ -252,6 +277,8 @@ $(O)/rt/%.o: runtime/%.c $(RT_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(RTFLAGS) -c $< -o $@
 
+$(O)/rt/platform/darwin.o: RTFLAGS += -x objective-c
+
 $(O)/rt/forge_imgui.o: runtime/forge_imgui_thunks.inc $(IMGUI)/cimgui.h
 $(O)/rt/forge_imgui.o: RTFLAGS += -DCIMGUI_NO_EXPORT -Wno-unused-variable
 
@@ -269,7 +296,7 @@ $(O)/imgui/%.o: $(IMGUI)/%.cpp
 
 $(O)/rt/nvn/vulkan/vma.o: runtime/nvn/vulkan/vma.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -O2 -w -Ithird_party/vk_mem_alloc -c $< -o $@
+	$(CXX) -O2 -w -Ithird_party/vk_mem_alloc $(LIB_INC) -c $< -o $@
 
 $(O)/fsr/%.c.o: $(FSR)/%.c
 	@mkdir -p $(dir $@)
@@ -279,7 +306,7 @@ $(O)/fsr/%.cpp.o: $(FSR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++17 $(FSRFLAGS) -include $(FSR)/src/$(if $(filter windows,$(PLATFORM)),ffx_mingw_portability.hpp,ffx_1_1_4_portability.hpp) -c $< -o $@
 
-$(EXE): $(RT_OBJ) $(AV_DEPS)
+$(EXE): $(RT_OBJ) $(if $(filter 1,$(STATIC_GAMELIB)),$(GEN_OBJ)) $(AV_DEPS)
 	@mkdir -p $(dir $@)
 	$(CXX) -o $@ $^ $(LDFLAGS)
 	$(GLIBC_CHECK)
