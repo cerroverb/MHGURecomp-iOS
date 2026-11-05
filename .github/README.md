@@ -2,7 +2,7 @@
 
 A fork of [morerokk/MHGURecomp](https://github.com/morerokk/MHGURecomp) for iPad and iPhone. It renders at the screen's
 real resolution and keeps the whole HUD visible on an iPad's 4:3 screen. New upstream releases are merged and built
-automatically.
+automatically. Also works on iPhone.
 
 No game data is included. You need your own dump of MHGU 1.4.0.
 
@@ -12,7 +12,7 @@ No game data is included. You need your own dump of MHGU 1.4.0.
 2. Sideload it with a tool such as [iloader](https://github.com/nab138/iloader).
 3. Start the app once, then put `exefs` and `romfs` in `MHGURecomp/data` with the Files app.
 
-A controller is needed, since there are no touch controls. Plus + Minus opens the settings menu. Everything else works
+A controller is recommended. Plus + Minus opens the settings menu. Everything else works
 as in [upstream's README](https://github.com/morerokk/MHGURecomp#readme).
 
 ## Credits and license
