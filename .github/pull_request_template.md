@@ -1,9 +1,3 @@
 Every pull request must be tested on a real iPhone or iPad before it is submitted. Pull requests without test results will be closed.
 
-## Test results
-
-- Device:
-- iOS or iPadOS version:
-- What was tested:
-- Result:
-- Screenshot, video or log:
+Say what you changed, which device and iOS version you tested it on, what you tested and what happened. Include a screenshot, video or log.
