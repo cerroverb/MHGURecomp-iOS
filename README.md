@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/logo.svg" alt="GU Recomp" width="440"></p>
+<p align="center"><img src="docs/images/logo.webp" alt="GU Recomp" width="481"></p>
 
 <p align="center"><b>English</b> · <a href="README.es.md">Español</a></p>
 
@@ -117,6 +117,7 @@ Releases may come out pretty often. To update automatically, start `mhgurecomp-u
 | Log | `log.txt`, please attach this file when opening an issue |
 | Screenshots | `shots\` (press F12) |
 | Mods | `mods\` one folder per mod (see below) |
+| Engine modules | `engine_modules\` (see below) |
 | Cheats | `cheats\` `.txt` files with cheat codes (see below) |
 | Shader cache | `cache\` |
 
@@ -359,6 +360,13 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
 - [MHGU-Modding Wiki](https://github.com/RTHKKona/MHGU-Modding/wiki)
 - [Fexty's Forge](https://github.com/Fexty12573/forge)
 
+## Engine modules
+
+Engine modules are native programs that extend the port itself, not the game (for example a different upscaler). They aren't
+mods or Forge plugins, and **they run with the same rights as the game, so only install ones you trust**. Nothing loads unless
+you ask for it: put the module's folder in `engine_modules\` and add its folder name on a line of its own in
+`engine_modules\enabled.txt`. `log.txt` lists what was loaded. Details for module authors: [docs/ENGINE-MODULES.md](docs/ENGINE-MODULES.md).
+
 ## Cheats
 
 You can configure cheats in the F1 menu. You can also manually configure them by putting .txt files in the `cheats/` subfolder.
@@ -371,7 +379,7 @@ starting with its name in square brackets:
 04000000 000DFAB4 E1A00080
 ```
 
-- Turn single cheats on and off in the settings menu (F1), on the Cheats tab. It takes effect immediately when you press Save.
+- Turn single cheats on and off in the settings menu (F1), on the Cheats tab. It takes effect immediately when you press Save. Cheat files added, edited or removed count the next time the settings menu opens.
 - To turn off a file without deleting it, start its name with `_`.
 - Cheats that change the game's code also work, but for each one used, you may experience *very* slight performance loss. For the vast majority of cheat codes, this won't matter.
 - `log.txt` lists the cheats it loaded, and any it couldn't read.
