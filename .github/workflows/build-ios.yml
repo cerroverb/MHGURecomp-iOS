@@ -16,7 +16,7 @@ env:
 jobs:
   build:
     name: Build MHGURecomp for iOS / iPadOS
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - name: Checkout repository
@@ -28,7 +28,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: deps-libs
-          key: ios-libs-macos-14-${{ env.MOLTENVK_VER }}-${{ env.SDL3_TAG }}-${{ env.SHADERC_TAG }}-${{ env.IOS_MIN }}
+          key: ios-libs-macos-15-${{ env.MOLTENVK_VER }}-${{ env.SDL3_TAG }}-${{ env.SHADERC_TAG }}-${{ env.IOS_MIN }}
 
       - name: Build MoltenVK, SDL3, shaderc
         if: steps.cache-libs.outputs.cache-hit != 'true'
@@ -86,14 +86,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: deps-libs
-          key: ios-libs-macos-14-${{ env.MOLTENVK_VER }}-${{ env.SDL3_TAG }}-${{ env.SHADERC_TAG }}-${{ env.IOS_MIN }}
+          key: ios-libs-macos-15-${{ env.MOLTENVK_VER }}-${{ env.SDL3_TAG }}-${{ env.SHADERC_TAG }}-${{ env.IOS_MIN }}
 
       - name: Restore FFmpeg
         id: cache-ffmpeg
         uses: actions/cache/restore@v4
         with:
           path: deps-ffmpeg
-          key: ios-ffmpeg-macos-14-${{ env.FFMPEG_TAG }}-${{ env.IOS_MIN }}
+          key: ios-ffmpeg-macos-15-${{ env.FFMPEG_TAG }}-${{ env.IOS_MIN }}
 
       # (the movies' MP4s, H.264 and AAC: the Makefile's FFMPEG_CONF, cross-compiled as android/android.mk does)
       - name: Build FFmpeg
@@ -123,7 +123,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: deps-ffmpeg
-          key: ios-ffmpeg-macos-14-${{ env.FFMPEG_TAG }}-${{ env.IOS_MIN }}
+          key: ios-ffmpeg-macos-15-${{ env.FFMPEG_TAG }}-${{ env.IOS_MIN }}
 
       - name: Collect the libraries
         run: |
