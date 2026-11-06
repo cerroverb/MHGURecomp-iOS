@@ -116,6 +116,19 @@ Fixed on the way (2026-10-20):
   (FXAA_FS_HASH, exec.c) and becomes a copy of its input when off.
   FXAAMode = 3_11 draws FXAA 3.11 Quality there instead (exec.c fxaa_311, shaders.c "fxaa.frag": preset 39, no
   sub-pixel blur, edge thresholds 0.063 / 0.0312, so textures stay sharp).
+  FXAAMode = Original draws shaders.c "fxaa.frag.game", the game's shader written out by hand (exec.c compile_program;
+  there and not at the translation, so sources already in programs.src get it too). The translation runs a loop over a
+  switch with 24 registers and a stack for every pixel. MHGU_CONTROL "gpuprof" now names the FXAA pass. The town at
+  1080p (MHGU_QUICKHUNT=town, about 25 s a run), the pass's GPU time, then the frame's and the frame rate:
+  - Radeon iGPU, Original: 2.97 -> 1.54 ms, 12.7 -> 11.3 ms, 71 -> 79 FPS (FXAA off: 0.26 ms, 10.0 ms, 88 FPS).
+  - Radeon iGPU, 3_11: 3.42 -> 2.75 ms, 13.2 -> 12.4 ms, 68 -> 72 FPS (two gathers, and no constant array read by index).
+  - RTX 5070 Ti, Original: 0.052 -> 0.035 ms of a 0.55 ms frame, too little to notice.
+  Two gathers replace five reads for the pixels that end at the range test: that path costs 0.45 ms on the iGPU. The
+  rest is edge pixels (31% of this town) searching along the edge. Original's picture is bit-identical: the old and new
+  code ran on the same frame with the output set to their difference x255 (MHGU_GLSL_OVERRIDE), all zero on both GPUs,
+  in the town, at a 1280x720 render size and in quest 101. The same test for 3_11 (town, both GPUs): also all zero. The
+  game's fma()s and the order of its sums had to stay: without them 0.15% of pixels differed, as exact ties go by rounding.
+  Not looking again at a search side that hasn't moved gives the same picture, but took 1.75 ms instead of 1.54 on the iGPU.
 - Frame rate: the settings' FPS or MHGU_FRAMERATE (default 60, 30..240) writes the engine's target fps (float at +0x3c of the object in
   global 0x2326764, the field theboy181's 60fps patch sets) each frame. Above the monitor's refresh rate it needs
   VSync = Off: see "Frame rates above 60". MHGU_VSYNC=0/1 overrides the setting: no vsync / classic vsync.
@@ -351,6 +364,17 @@ board then says "You don't meet the requirements to join this Quest" and shows i
 HR72 hosting a Wycademy Hub, client a new HR1 save with only Village 1 star): Defiant Maccao (728, 7 stars) and A
 Fungal Hunt (105, a 1-star quest the client hadn't unlocked) refused; Find the Ferns (101) joined. A Forge plugin
 could do the same (same hooks), but the HP part is the port's own.
+
+Maps (2026-11-05): a Village quest's supply box has one Map (0x6b3), a Hub quest's four. Started from the Hub or
+Pub (hpscale's test, `hpscale_village_from_hub`), it gets 3 more in the box's last empty slots. Supply data: the
+quest arc's quest\supp\supp_<n> (rSupplyList, DTI 0x1a8acf0): f32 1.0, u32 count, then entries of 40 slots
+{u16 item, u8 count, u8 group} (in memory 0xa4 B: +4 items, +0x54 counts, +0x7c groups; a nonzero group starts a
+delivery's items, 0 continues the previous). The box is sQuest +0x1a54: +4 cQuestData, +0xc 40 x {u16 item, u16
+count}, +0xac next slot, +0xc0 a bit per slot that is in the box now. 0x5abc00 (quest start) clears it, 0x5accbc
+copies group 0's non-empty items from slot 0 (bits set), and 0x5ace14 the deliveries' after them (bits clear until
+they arrive; delivery kind 4 from slot 32 on: Find the Ferns, 101, fills 32-39 so). Hooked after 0x5ace14: the maps
+go in the last empty slots (101: 29-31), so they never take a delivery's place. Tested with the hub test forced in
+101 (MHGU_VQ_TRACE=1 logs the box): maps in 29-31, bits set; not yet seen in the box's menu, nor in multiplayer.
 
 ## Urgent quests count for everyone (2026-11-01)
 
@@ -1002,6 +1026,38 @@ and the settings row. A release could only use it with a loader DLL the player s
 it, and bundling AMD's SDK DLLs (PR 168) would add 36 MB (uncompressed) for few players. FSR 3.1 stays. An ini that still
 has `Upscaler = ...` loads as before: the line is logged as an unknown setting, ignored and kept. The instance asks for
 Vulkan 1.2 in every case now.
+
+## Interpreter: pre-decoded blocks (2026-11-06, branch perf/interp-blocks)
+
+Asked for MH4U Port (reports: slow loading screens, frame drops with a bowgun even in the village, a laggy item box;
+slower than on emulators, which JIT the mod's code). The costs are the ones measured above (the "has skill" hook,
+quest_group_rename): the mod's own code, which only the interpreter runs. It took ~25 cycles a guest instruction
+(4.95 ns here), decoding every instruction each time it ran. Now (runtime/interp.c "pre-decoded blocks") a run
+decodes a straight stretch once into ops (up to an instruction that may branch, the end of its interpreted range, or
+32): the class function the decode picks, called without decoding again, and fast handlers for the common forms
+(data processing with an immediate or LSL'd register, CMP / CMN / TST, ADDS / SUBS, LDR / STR / LDRB / STRB / LDRH /
+STRH / LDRSB / LDRSH with an immediate or LSL'd register offset and writeback forms, literal loads, MOVW / MOVT, B /
+BL / BX / BLX). Anything else runs interp_exec as before. Blocks are per thread (no locks), direct-mapped by pc in a
+2 MiB arena (dropped when full) and link to the last two blocks they went on to. Changed code: each op compares the
+word in memory it was decoded from before it runs; fnhook_set / fnhook_keep_entry bump g_code_gen (code_word reads
+the hook bits), which drops a thread's blocks at its next block. interpwatch / interpread step one instruction the
+old way while on.
+- Checked: tools/test_lift.py --interp-ops (new: the ops through interp_exec_op) against Unicorn, 20000 instructions
+  of main and of sdk, and 20000 more of the fast-path forms each: none different from --interp and the lifted C (the
+  one sdk failure, `and r3, r5, r3` at 0x2451bd4, fails the lifted C and --interp too: the test's). The test harness
+  had bit-rotted for --interp (interp.c's newer externs): stubs added.
+- Standalone (a scratch harness running the game's own code interpreted): adler32 over 1 MiB 20.4 -> 5.7 ms,
+  the SDK's qsort of 20000 ints 203 -> 98 ms (2.5 ns an instruction, branchy code: blocks are ~5 instructions).
+- In the game (hidden window, MH4U Port core 1.8.0 + its 4 monster packages from the releases, testsave/save_0,
+  MHGU_QUICKHUNT=101, the master build at 6d81cc3 against this): the town's load with the mod 6.2 -> 3.0 s (from
+  "tigerstripe_zamtrios installed" to the town, two runs each, within 0.2 s); quest_group_rename's stretch 4.95 ->
+  2.3 ns an instruction; in quest 101 the interpreter 160 -> 82 ms a second of play (28 M instructions/s, 99% the
+  "has skill" hook at 34000 calls/s, 240 fps). The mod's log the same (710 lines), no faults. Not tried by hand: a
+  bowgun, the item box, a laptop CPU, Android / Linux builds (plain C, nothing platform-specific added).
+- Still the mod's to fix for most of the rest: gear_has_skill_c rescans every monster's sections per call (~820
+  instructions, almost always "no"); keeping the SKIL pointers once loaded cuts it to a few dozen. Further on our side:
+  tail-call threaded ops (each handler jumping to the next) might give another ~1.5x; matching an emulator would take a
+  JIT (AArch32 -> x86-64 and -> AArch64), a project of its own.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game

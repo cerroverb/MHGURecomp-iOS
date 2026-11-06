@@ -289,6 +289,8 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
   las zonas habituales; con el precalentamiento activado también se preparan en segundo plano, así que al entrar en
   esas zonas por primera vez ya no se ven superficies negras un momento. Solo se hizo con MSAA desactivado; el resto
   se sigue preparando la primera vez que hace falta. Cómo grabar más: [docs/PIPELINE_LIST.md](docs/PIPELINE_LIST.md).
+  `LoadingIndicator` (On / Off: el recuadro "Cargando" de la esquina inferior derecha mientras el juego arranca y
+  prepara sus shaders; solo en el ini, no en el menú de ajustes)
 - `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (el botón de confirmar del menú de ajustes),
   `BackgroundInput` (On / Off: el mando sigue funcionando con la ventana del juego en segundo plano, por ejemplo con
   una wiki delante; On por defecto), `ComboInputWindow` (Lenient / Strict: cuánto espera el juego a un segundo botón
@@ -376,8 +378,10 @@ juego al iniciarlo.
 - Se cargan los plugins de Forge (`.nro` en `romfs\nativeNX\plugins\`). El cargador propio de Forge (el
   `exefs\subsdk9` que incluyen Forge y los mods con plugins de Forge) no hace falta y se ignora: el port ejecuta los
   plugins él mismo. El menú de Forge con los ajustes de los plugins se abre con Insert (o la tecla del `config.ini`
-  de Forge, si un mod incluye los archivos de Forge, que también puede fijar `[log] level`); usa el ratón, el teclado o
-  el mando en él. Mientras está abierto, el juego no recibe la entrada del mando. Las posiciones de las ventanas se
+  de Forge, si un mod incluye los archivos de Forge, que también puede fijar `[log] level`) o, solo con mando, con
+  **Abrir el menú de Forge** al final de la pestaña Mods de las opciones; usa el ratón, el teclado o el mando en él.
+  Con mando, el botón que cancela en los menús del juego (cuando no queda nada que cancelar en la ventana de Forge) o
+  Start + Back lo cierra. Mientras está abierto, el juego no recibe la entrada del mando. Las posiciones de las ventanas se
   guardan en `forge_imgui.ini`.
 - No necesitas mods de resolución, de límite de FPS ni de conexión. Este port ya incluye esas funciones.
 
@@ -513,7 +517,8 @@ En Windows eso escribe `dist\Windows-MHGURecomp.0.10.4.zip`; en Linux (o en WSL,
 `dist/Linux-MHGURecomp.0.10.4.tar.gz`, que mantiene los programas ejecutables. Cada uno contiene una carpeta con
 `mhgurecomp(.exe)`, `mhgugame.dll` / `.so`, `mhgurecomp-updater(.exe)`, las DLL incluidas, `licenses\`,
 `bonus\system` (de `BONUS`, si no, vacío) y las carpetas vacías `data\`, `mods\` y `cheats\`; nunca nada del juego, ni
-los ajustes, cachés o mods de la carpeta de compilación. `make dist` muestra el SHA-256 de cada archivo.
+los ajustes, cachés o mods de la carpeta de compilación. `make dist` muestra el SHA-256 de cada archivo. Se detiene si
+`tools/gen.py` u otras fuentes del traductor cambiaron desde el último `make gen`: ejecútalo antes.
 
 En Windows, cuando el SDK de Android está instalado (ver [docs/research/android.md](docs/research/android.md)),
 `make dist` escribe también `dist\Android-MHGURecomp.0.10.4.apk`: solo arm64, con `pipelines.list`, `licenses` y la

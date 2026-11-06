@@ -272,7 +272,8 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   340 MB). `pipelines.list` next to the exe lists the shader combinations the common areas use; with the prewarm on,
   they are prepared in the background as well, so entering those areas for the first time no longer shows surfaces
   briefly black. Only made with MSAA Off; the rest is still prepared the first time it is needed. Recording more of
-  it: [docs/PIPELINE_LIST.md](docs/PIPELINE_LIST.md).
+  it: [docs/PIPELINE_LIST.md](docs/PIPELINE_LIST.md). `LoadingIndicator` (On / Off: the "Loading" box in the bottom
+  right corner while the game starts up and prepares its shaders; only in the ini, not in the settings menu)
 - `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (the settings menu's confirm button),
   `BackgroundInput` (On / Off: the controller keeps working while the game's window is in the background, such as
   with a wiki in front of it; default On), `ComboInputWindow` (Lenient / Strict: how long the game waits for a
@@ -346,8 +347,10 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   what was patched and loaded (`[mods]` lines).
 - Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's own loader (the `exefs\subsdk9` that
   Forge and mods with Forge plugins include) is not needed and is passed over: the port runs the plugins itself. Forge's menu with the plugins' settings opens with
-  Insert (or the key in Forge's own `config.ini`, if a mod includes Forge's files, which can also set `[log] level`);
-  use the mouse, keyboard or controller in it. While it is open the game gets no controller input. Window positions
+  Insert (or the key in Forge's own `config.ini`, if a mod includes Forge's files, which can also set `[log] level`),
+  or, with a controller alone, with **Open the Forge menu** at the bottom of the settings' Mods tab;
+  use the mouse, keyboard or controller in it. On a controller, the button that cancels in the game's menus (when
+  nothing in the Forge window is left to cancel) or Start + Back closes it. While it is open the game gets no controller input. Window positions
   are kept in `forge_imgui.ini`.
 - You do not need any resolution, FPS cap or connection fix mods. These features are included with this port.
 
@@ -477,7 +480,8 @@ On Windows that writes `dist\Windows-MHGURecomp.0.10.4.zip`; on Linux (or in WSL
 O=obj-linux`) `dist/Linux-MHGURecomp.0.10.4.tar.gz`, which keeps the programs executable. Each holds one folder
 with `mhgurecomp(.exe)`, `mhgugame.dll` / `.so`, `mhgurecomp-updater(.exe)`, the bundled DLLs, `licenses\`,
 `bonus\system` (from `BONUS`, else left empty), and empty `data\`, `mods\` and `cheats\` folders; never anything of
-the game's, or the build folder's settings, caches or mods. `make dist` prints each archive's SHA-256.
+the game's, or the build folder's settings, caches or mods. `make dist` prints each archive's SHA-256. It stops if
+`tools/gen.py` or the other translator sources changed since the last `make gen`: run that first.
 
 On Windows, when the Android SDK is installed (see [docs/research/android.md](docs/research/android.md)), `make dist`
 then also writes `dist\Android-MHGURecomp.0.10.4.apk`: arm64 only, with `pipelines.list`, `licenses` and the bonus
