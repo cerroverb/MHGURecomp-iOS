@@ -162,7 +162,7 @@ CC       := xcrun --sdk iphoneos clang $(ARCH_FLAGS)
 CXX      := xcrun --sdk iphoneos clang++ -std=gnu++17 $(ARCH_FLAGS)
 GENFLAGS += -fPIC
 OSFLAGS  :=
-LIB_INC  := -I$(DEPS)/include
+LIB_INC  := -I$(DEPS)/include -I$(ZSTD_DIR)/include
 EXE      := $(B)/MHGURecomp
 STATIC_GAMELIB ?= 1
 FRAMEWORKS := -framework UIKit -framework Metal -framework QuartzCore -framework Foundation \
@@ -171,7 +171,7 @@ FRAMEWORKS := -framework UIKit -framework Metal -framework QuartzCore -framework
               -framework IOSurface -framework CoreVideo -framework CoreMedia \
               -framework AVFoundation -framework CoreBluetooth -framework CoreMotion \
               -framework OpenGLES -framework UniformTypeIdentifiers
-LDFLAGS  := $(ARCH_FLAGS) -L$(DEPS)/lib -lSDL3 $(AV_LIBS) -lMoltenVK -lshaderc_combined $(FRAMEWORKS) -lc++
+LDFLAGS  := $(ARCH_FLAGS) -L$(DEPS)/lib -lSDL3 $(AV_LIBS) -lMoltenVK -lshaderc_combined $(ZSTD_LIBS) $(FRAMEWORKS) -lc++
 GAMELIB  := $(B)/mhgugame.dylib
 GAMELIB_LDFLAGS := -shared $(ARCH_FLAGS)
 else
