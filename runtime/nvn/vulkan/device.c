@@ -23,6 +23,10 @@
 #include "hdr.h"
 #include "vk.h"
 
+#ifdef __APPLE__
+void plat_edr_layer(bool on);
+#endif
+
 VkG g_vk;
 static VkDebugUtilsMessengerEXT messenger;
 // Windows: the swapchain says it never wants exclusive full screen (VK_EXT_full_screen_exclusive). Otherwise NVIDIA's
@@ -507,6 +511,9 @@ static int hdr_surface_format(const VkSurfaceFormatKHR *fmts, uint32_t nf, int w
             lin = (int)i;
     }
     int fmt = want - 1;  // HDR_FORMAT_*
+#ifdef __APPLE__
+    if (lin >= 0) return *out = HDR_OUT_SCRGB, lin;  // (iOS: RGBA16F is what works on a CAMetalLayer, MoltenVK #2759)
+#endif
     if (fmt == HDR_FORMAT_SCRGB && lin >= 0) return *out = HDR_OUT_SCRGB, lin;
     if (pq >= 0) return *out = HDR_OUT_PQ, pq;
     if (lin >= 0) return *out = HDR_OUT_SCRGB, lin;
@@ -650,6 +657,9 @@ static void create_swapchain(void) {
     g_vk.sc_count = 0;
     if (old) vkDestroySwapchainKHR(g_vk.dev, old, NULL);
     g_hdr_out = out;
+#ifdef __APPLE__
+    plat_edr_layer(out != HDR_OUT_NONE);  // (runtime/platform/darwin.c: MoltenVK does this on macOS only)
+#endif
     // (HDR: the game draws into the composition image, which stays in GENERAL to be sampled)
     VkFormat wfmt = out ? COMPOSE_FORMAT : sf.format;
     VkRenderPass pass = window_pass(wfmt, true, out ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);

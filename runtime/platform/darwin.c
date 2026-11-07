@@ -203,6 +203,7 @@ static bool mkdir_p(const char *path) {
 
 #if defined(__APPLE__)
 #import <Foundation/Foundation.h>
+#import <QuartzCore/CAMetalLayer.h>
 #import <UIKit/UIKit.h>
 
 void plat_setup_ios_documents(void) {
@@ -561,6 +562,30 @@ void plat_show_missing_files_screen(const char *main_path, const char *doc_path)
             SDL_DestroyWindow(win);
         }
     }
+}
+// iOS: MoltenVK sets wantsExtendedDynamicRangeContent on macOS only, so an HDR window image is clamped to SDR. Set here
+// on the window's layer after vkCreateSwapchainKHR, the workaround in KhronosGroup/MoltenVK#2759.
+static CAMetalLayer *metal_layer(UIView *v) {
+    if ([v.layer isKindOfClass:[CAMetalLayer class]]) return (CAMetalLayer *)v.layer;
+    for (UIView *s in v.subviews) {
+        CAMetalLayer *l = metal_layer(s);
+        if (l) return l;
+    }
+    return nil;
+}
+
+extern SDL_Window *ui_window(void);
+
+void plat_edr_layer(bool on) {
+    SDL_Window *win = ui_window();
+    UIWindow *w = win ? (__bridge UIWindow *)SDL_GetPointerProperty(SDL_GetWindowProperties(win),
+                                                                   SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, NULL) : nil;
+    if (!w) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        CAMetalLayer *l = metal_layer(w);
+        if (@available(iOS 16.0, *)) l.wantsExtendedDynamicRangeContent = on;
+        fprintf(stderr, "[hdr] EDR on the window's layer: %s\n", l ? (on ? "on" : "off") : "no layer");
+    });
 }
 #else
 void plat_show_missing_files_screen(const char *main_path, const char *doc_path) {
