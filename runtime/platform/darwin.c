@@ -574,6 +574,27 @@ static CAMetalLayer *metal_layer(UIView *v) {
     return nil;
 }
 
+// The display's EDR headroom, read on the main thread about once a second (UIScreen sends no change notice). Current
+// when it is above 1, else potential, as SDL does (src/video/uikit/SDL_uikitmodes.m).
+static _Atomic float edr_headroom = 1.0f;
+
+float plat_edr_headroom(void) {
+    static _Atomic uint64_t last;
+    uint64_t now = plat_now_ns();
+    if (now - atomic_load(&last) > 1000000000ull) {
+        atomic_store(&last, now);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (@available(iOS 16.0, *)) {
+                UIScreen *s = UIScreen.mainScreen;
+                float h = (float)s.currentEDRHeadroom;
+                if (h <= 1.0f) h = (float)s.potentialEDRHeadroom;
+                atomic_store(&edr_headroom, h > 1.0f ? h : 1.0f);
+            }
+        });
+    }
+    return atomic_load(&edr_headroom);
+}
+
 extern SDL_Window *ui_window(void);
 
 void plat_edr_layer(bool on) {

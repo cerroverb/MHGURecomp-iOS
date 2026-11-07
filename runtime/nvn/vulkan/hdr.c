@@ -157,13 +157,24 @@ static float gamma_value(void) {
     return g == HDR_GAMMA_22 ? 2.2f : g == HDR_GAMMA_24 ? 2.4f : 0.0f;
 }
 
+#ifdef __APPLE__
+// iOS EDR: 1.0 is SDR white, not scRGB's 80 nits, and what is above the display's headroom clips (Apple, WWDC21 "Explore
+// HDR rendering with EDR"). So 1.0 is the default game white, and the peak is what the display can show now.
+#define SCRGB_WHITE "203.0"
+float plat_edr_headroom(void);  // (runtime/platform/darwin.c)
+static float hdr_peak(void) { return fminf(config_live_hdr_peak(), 203.0f * plat_edr_headroom()); }
+#else
+#define SCRGB_WHITE "80.0"
+static float hdr_peak(void) { return config_live_hdr_peak(); }
+#endif
+
 // [0] x tone mapper (HDR_TONEMAP_*), y gamma correction (0 off, 2.2, 2.4), z game white / UI white, w the tone mapper's
 //     peak (relative to game white, in the gamma-corrected space); [1] exposure, highlights, shadows, contrast;
 // [2] saturation, blowout (from highlight saturation), flare, bloom; [3] x 1: on
 void vk_hdr_params(float o[HDR_NPARAMS]) {
     memset(o, 0, HDR_NPARAMS * sizeof *o);
     int tm = config_live_hdr_tonemap();
-    float g = gamma_value(), game = config_live_hdr_game(), ui = config_live_hdr_ui(), peak = config_live_hdr_peak();
+    float g = gamma_value(), game = config_live_hdr_game(), ui = config_live_hdr_ui(), peak = hdr_peak();
     float ratio = fmaxf(peak / game, 1.0f);
     if (g > 0) ratio = srgb_decode(powf(ratio, 1.0f / g));  // (RenoDX: correct::Gamma(peak ratio, true, gamma))
     o[0] = (float)tm, o[1] = g, o[2] = tm == HDR_TONEMAP_VANILLA ? 1.0f : game / ui, o[3] = ratio;
@@ -179,7 +190,7 @@ void vk_hdr_params(float o[HDR_NPARAMS]) {
 }
 
 void vk_hdr_metadata_values(float *peak, float *avg) {
-    *peak = config_live_hdr_peak();
+    *peak = hdr_peak();
     *avg = config_live_hdr_game();
 }
 
@@ -405,7 +416,7 @@ static const char *const encode_frag =
     "  vec3 lin = pc.opt.y > 0.0 ? spow(c, pc.opt.y) : srgb_dec(c);\n"
     "  vec3 nits = to_bt2020(lin * (vanilla ? pc.lum.x : pc.lum.y));\n"
     "  nits = clamp(nits, 0.0, pc.lum.z);\n"
-    "  if (pc.lum.w > 1.5) o = vec4(from_bt2020(nits) / 80.0, 1.0);\n"
+    "  if (pc.lum.w > 1.5) o = vec4(from_bt2020(nits) / " SCRGB_WHITE ", 1.0);\n"
     "  else o = vec4(pq(nits), 1.0);\n"
     "}\n";
 
@@ -472,7 +483,7 @@ void vk_hdr_encode(VkCommandBuffer cb, VkRenderPass rp, TexBackend *compose) {
     VkRect2D scissor = {{0, 0}, {compose->width, compose->height}};
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &scissor);
-    float pc[8] = {config_live_hdr_game(), config_live_hdr_ui(), config_live_hdr_peak(), (float)g_hdr_out,
+    float pc[8] = {config_live_hdr_game(), config_live_hdr_ui(), hdr_peak(), (float)g_hdr_out,
                    (float)config_live_hdr_tonemap(), gamma_value(), 0, 0};
     vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
     vkCmdDraw(cb, 3, 1, 0, 0);
@@ -664,7 +675,7 @@ void vk_hdr_analyze(VkCommandBuffer cb, TexBackend *src) {
     vk_full_barrier(cb);  // (the picture finished, the buffer cleared)
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, an_pipe);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, an_layout, 0, 1, &ds, 0, NULL);
-    float pc[8] = {config_live_hdr_game(), config_live_hdr_ui(), config_live_hdr_peak(), (float)g_hdr_out,
+    float pc[8] = {config_live_hdr_game(), config_live_hdr_ui(), hdr_peak(), (float)g_hdr_out,
                    (float)config_live_hdr_tonemap(), gamma_value(), present_2020 ? 1.0f : 0.0f, 0};
     vkCmdPushConstants(cb, an_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, pc);
     uint32_t gx = (src->width / 2 + 15) / 16, gy = (src->height / 2 + 15) / 16;
