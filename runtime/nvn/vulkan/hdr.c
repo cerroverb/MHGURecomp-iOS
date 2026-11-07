@@ -157,16 +157,25 @@ static float gamma_value(void) {
     return g == HDR_GAMMA_22 ? 2.2f : g == HDR_GAMMA_24 ? 2.4f : 0.0f;
 }
 
-#ifdef __APPLE__
-// iOS EDR: 1.0 is SDR white, not scRGB's 80 nits, and what is above the display's headroom clips (Apple, WWDC21 "Explore
-// HDR rendering with EDR"). So 1.0 is the default game white, and the peak is what the display can show now.
-#define SCRGB_WHITE "203.0"
-float plat_edr_headroom(void);  // (runtime/platform/darwin.c)
-static float hdr_peak(void) { return fminf(config_live_hdr_peak(), 203.0f * plat_edr_headroom()); }
-#else
-#define SCRGB_WHITE "80.0"
-static float hdr_peak(void) { return config_live_hdr_peak(); }
-#endif
+// What the window's display says (SDL's window properties: Windows, macOS, iOS, Wayland). scRGB's 1.0 is 80 nits on
+// Windows only: on Apple's EDR it is SDR white, and what is above the headroom clips (SDL_video.h; Apple, WWDC21 "Explore
+// HDR rendering with EDR"). So the default game white is SDR white, and the peak is at most what the display can show.
+#define HDR_REF_WHITE 203.0f
+SDL_Window *ui_window(void);
+
+static float window_hdr_value(const char *name) {
+    SDL_Window *w = ui_window();
+    return w ? SDL_GetFloatProperty(SDL_GetWindowProperties(w), name, 1.0f) : 1.0f;
+}
+
+static float scrgb_nits(void) {  // (nits at 1.0 of an scRGB window image)
+    return HDR_REF_WHITE / fmaxf(window_hdr_value(SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT), 1.0f);
+}
+
+static float hdr_peak(void) {
+    float headroom = window_hdr_value(SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT);  // (1: none told)
+    return headroom > 1.0f ? fminf(config_live_hdr_peak(), HDR_REF_WHITE * headroom) : config_live_hdr_peak();
+}
 
 // [0] x tone mapper (HDR_TONEMAP_*), y gamma correction (0 off, 2.2, 2.4), z game white / UI white, w the tone mapper's
 //     peak (relative to game white, in the gamma-corrected space); [1] exposure, highlights, shadows, contrast;
@@ -378,7 +387,8 @@ char *vk_hdr_wrap_fs(const char *src, int pass) {
 }
 
 // ---- the window image
-// pc.lum: x game white, y UI white, z peak (nits), w output (1 PQ, 2 scRGB); pc.opt: x tone mapper, y gamma (0 sRGB)
+// pc.lum: x game white, y UI white, z peak (nits), w output (1 PQ, 2 scRGB); pc.opt: x tone mapper, y gamma (0 sRGB),
+// z nits at scRGB 1.0
 static const char *const encode_vert =
     "#version 450\n"
     "void main() {\n"
@@ -416,7 +426,7 @@ static const char *const encode_frag =
     "  vec3 lin = pc.opt.y > 0.0 ? spow(c, pc.opt.y) : srgb_dec(c);\n"
     "  vec3 nits = to_bt2020(lin * (vanilla ? pc.lum.x : pc.lum.y));\n"
     "  nits = clamp(nits, 0.0, pc.lum.z);\n"
-    "  if (pc.lum.w > 1.5) o = vec4(from_bt2020(nits) / " SCRGB_WHITE ", 1.0);\n"
+    "  if (pc.lum.w > 1.5) o = vec4(from_bt2020(nits) / pc.opt.z, 1.0);\n"
     "  else o = vec4(pq(nits), 1.0);\n"
     "}\n";
 
@@ -484,7 +494,7 @@ void vk_hdr_encode(VkCommandBuffer cb, VkRenderPass rp, TexBackend *compose) {
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &scissor);
     float pc[8] = {config_live_hdr_game(), config_live_hdr_ui(), hdr_peak(), (float)g_hdr_out,
-                   (float)config_live_hdr_tonemap(), gamma_value(), 0, 0};
+                   (float)config_live_hdr_tonemap(), gamma_value(), scrgb_nits(), 0};
     vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
     vkCmdDraw(cb, 3, 1, 0, 0);
 }
