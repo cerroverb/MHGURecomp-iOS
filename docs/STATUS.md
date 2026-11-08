@@ -357,7 +357,7 @@ text, cursor, Appear) -> 7 -> 8 shown until Calc returns 1 -> 9 (Unset) -> 3 rea
 ## Monster HP by the number of hunters (2026-10-21)
 
 ini [Monster HP]: factors on large monsters' HP in Hub-type quests for 1-4 hunters (default 1 = original), plus
-`Quest<number> = f1, f2, f3, f4` to set one quest apart. Only HP changes. A quest gives each large monster a row
+`Quest<number> = f1, f2, f3, f4` to set one quest apart. Only HP and part HP change (part HP: see the end of this section). A quest gives each large monster a row
 of the difficulty table (resident.arc enemy\resident\em_nando_tbl, "NAN": u32 magic, version, row count, then rows
 of 8 floats: HP, attack, defense...; cQuestData mVitalTblNo_N / mAttackTblNo_N / mOtherTblNo_N pick rows, and the
 game moves the HP row a little per quest, e.g. 17 -> 16..19, with the size). Max HP = base HP (dtbase) x row[0], set in 0x2c04a0 /
@@ -368,7 +368,14 @@ quests are left alone by number (below 10000, Village Prowler 100000-109999); hu
 clients use them while in that hub. Data: sQuest *0x1a8ad90 (+0xa4 cQuestData, +8 quest number), sQuestSelector
 *0x1a8ae38. Tested (two instances, Tackling the Tetsucabra, quest 10107, base HP 4000): solo x0.6 -> max HP 1392
 (= 4000 x 0.58 x 0.6); two hunters, host 0.5 / client's own 3.0 -> both 1340 (= 4000 x 0.67 x 0.5). Village quest
-exclusion and 3-4 hunters not tested in game. MHGU_LOG_HPSCALE=1 also logs the resulting max HP.
+exclusion and 3-4 hunters not tested in game. MHGU_LOG_HPSCALE=1 also logs the resulting max HP and each part's HP.
+Part HP (2026-11-08): row +0xc (4th float, read through column 2) is the quest's multiplier on part HP: flinch HP
+(0x299db8, rec+0x3be), sever HP (0x29d1a8, rec+0x3c0) and the monster classes' own part code; a part breaks after a
+number of flinches. The hook scales it with the HP factor (HubHP included), capped at x16: the values are 16-bit, read
+signed, and the largest base in the game is 1600 flinch / 1500 sever. Monsters so flinch as often per HP lost as in the
+original game. Tested (quest 206, Great Maccao, hook forced to the from-Hub case because the test save starts in the
+Village): flinch HP 114 / 171 / 123 / 95 at x1, 57 / 85 / 61 / 47 at x0.5, 1920 / 2880 / 2080 / 1600 at x40 (the
+cap, row x16 of bases 120 / 180 / 130 / 100). Not tested: cutting a tail in play, multiplayer.
 
 ## Village quests in the Hub (2026-10-22)
 
@@ -987,9 +994,16 @@ the reads.
   out once, and an entry outside it skipped before the loops); the time is in the mod's own code, which only the
   interpreter runs (~20 cycles an instruction: faster would take pre-decoding, not a quick change). Quest 101 itself
   loads as fast with it as without.
-- Not changed: the game's waits. Skipping state 9's 2.5 s (the card shown with nothing loading) would be the biggest
-  cut, but it is the game's design: an option at most, Next steps 13 has the details. The town's load from the title
-  wasn't measured this way.
+- The game's waits, shortened when not in a network session (2026-11-08, runtime/hle/fastload.c; gate: !ldn_net_up(),
+  checked with a local hub: the waits stay; MHGU_NO_FASTLOAD=1 for the game's timing). Three, none of them loading:
+  state 9's count; the music streams' stop fade, 1500 ms leaving a town (0x6de8f4) and 1000 ms for a zone change
+  (0x6de048), both through 0x6e3ecc, now 300 ms; and the counter 0x6dee48 polls on the black screen (sound +0x1c, to
+  60 or 90 steps), now 4.5 times as fast. 0x6dee48 still waits until the streams and voices have stopped. Measured at 60
+  fps, the fade's start to the arrival: Depart on Quest 5.0 -> 1.8 s, village to village 2.6 -> 1.4, zone change 1.4 ->
+  0.7. The count is 150 updates of at least 1 each (the int drops the step's fraction): 2 - 2.5 s up to 60 fps, 1 s at
+  150 fps. Title to village: none of these waits from the village area's creation to its start (2.4 s, reading files; the
+  character select before that wasn't timed). Not
+  changed: returning from a quest (other callers of 0x6dee48: 0x8a12e4, 0x20fcb8, 0x2121c8, not timed).
 - Tools: MHGU_SAMPLE=<file> (runtime/sampler.c, Windows): a sampling profiler, every thread's call stack about every
   millisecond with the CPU cycles it used; tools/samples.py reads it (timeline / top / wait, game functions as their
   guest addresses). Sleeping threads are sampled every 16th round, for where they wait.
@@ -1036,7 +1050,19 @@ host_input.c gives the mouse to the camera while the handler ran in the last 200
 Tested 2026-10-31 in quest 101 with the control file's mousemove: 500 counts = 40 degrees left and right, 20 counts
 turn 1.6 degrees, 1 count a second still turns; pitch stops at the game's limits and comes back at once; all four
 invert settings; the in-quest start menu (the camera turns there with the stick too). Not tried by hand with a real
-mouse, nor with a gunner's aim, mounting or the second camera type (+0x980).
+mouse, nor with mounting or the second camera type (+0x980).
+
+Aiming (2026-11-08): while aiming (the Bow's R, action 0010:011 and the charging actions) the stick turns the hunter
+and the camera follows, so 0x2255cc doesn't run and the mouse fell back to the stick emulation. The aim camera
+(0x226e84) takes its yaw from the hunter's +0x14a0 and its pitch from the float at +0x14bc (-100 to 100, spread over
+camera parameters 0x1d up and 0x1e down, 56 degrees each), and steps its eye angles +0x9d8 / +0x9dc straight toward
+them. 0x4a1738 (r0 = player, r1 = mode: the weapon's kind of aim, 3 for the Bow, r2 = yaw) applies the turn, reached
+from the stick reader 0x4a07a8 only while the player may turn, so it is hooked too: the counts go to the yaw, the pitch
+(+0x14b8 / +0x14bc) and the eye's angles, with the aim's own invert option (options byte +0x66). It stands aside when
+0x2255cc also ran since its last call (camera options that keep the stick on the camera). Tested 2026-11-08 with a Bow
+at 30 and 120 fps: 500 counts = 40.1 degrees aiming and charging, as out of aiming; 150 counts up = 12 degrees; the eye
+within 3 units of the aim while turning; pitch stops at +-56 degrees. Not tried by hand with a real mouse, nor with
+the Bowguns' aim (other modes; mode 1's pitch is +0x2714 instead), nor the aim invert settings.
 
 ## Mouse wheel on the item bar (2026-10-31)
 
@@ -1268,8 +1294,8 @@ old way while on.
 12. Main Menu without Download / Data Transfer, with a Quit item (on hold, 2026-10-30): the title sequence's state
    machine, the menu cursor, the help line and the bar labels (pictures in HD_title00, no "Quit" among them) are
    mapped; what is left and how: docs/research/title-menu.md.
-13. Option: skip the game's forced 2.5 s wait before a quest loads (on hold, 2026-10-31; see "Loading screens"). What is
-   known: departing from a town calls the town area's depart method 0x8c02a4 (area mode +0xb8 = 4, a quest flag
+13. Done when not in a network session (2026-11-08, see "Loading screens"); in one the waits are the game's. What was
+   found: departing from a town calls the town area's depart method 0x8c02a4 (area mode +0xb8 = 4, a quest flag
    +0xda = 1). Mode 4's handler 0x8bd720 switches on the state byte at area +5 (byte 1 of the word +4): states 1-3
    start the fade, 4 (0x8bd8e0) waits for the fade object (0x5f85fc: its +0x54 object's +0x60 bit 0) and 0x6dee48
    (the music), 5-7 one update each, 8 (0x8bda88) sets state 9 when +0xda is set (else mode 6), and state 9
