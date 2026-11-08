@@ -169,7 +169,13 @@ static float window_hdr_value(const char *name) {
 }
 
 static float scrgb_nits(void) {  // (nits at 1.0 of an scRGB window image)
+#ifdef __APPLE__
     return HDR_REF_WHITE / fmaxf(window_hdr_value(SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT), 1.0f);
+#else
+    // (80 elsewhere: SDL leaves the white level at 1.0 on Wayland, src/video/wayland/SDL_waylandwindow.c, where the
+    // colour-management protocol's Windows-scRGB is 80 nits at 1.0 as on Windows; morerokk/MHGURecomp#295)
+    return 80.0f;
+#endif
 }
 
 static float hdr_peak(void) {
