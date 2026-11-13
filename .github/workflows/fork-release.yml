@@ -273,6 +273,10 @@ jobs:
 
           # Copy plists, icons and the recorded pipelines (runtime/nvn/vulkan/exec.c plist_load: beside the executable)
           cp ios/Info.plist "$APP_DIR/Info.plist"
+          # The release's version, shown by sideloaders such as Feather (ios/Info.plist itself says 1.0.0)
+          plutil -replace CFBundleShortVersionString -string "$UP.$REVISION" "$APP_DIR/Info.plist"
+          plutil -replace CFBundleVersion -string "$UP.$REVISION" "$APP_DIR/Info.plist"
+          plutil -p "$APP_DIR/Info.plist" | grep -E 'CFBundle(ShortVersionString|Version)'
           cp ios/Entitlements.plist "$APP_DIR/Entitlements.plist"
           cp ios/Icon.png "$APP_DIR/Icon.png"
           cp ios/Icon.png "$APP_DIR/AppIcon60x60@2x.png"
