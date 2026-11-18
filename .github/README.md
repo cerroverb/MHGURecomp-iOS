@@ -21,7 +21,7 @@ No. If you want that, request it upstream, as morerokk maintains an Android buil
 
 # Known issues
 
--App can sometimes crash on returning from multitasking or simply exiting the app to the home menu. Fix is coming at some point, but for now, be sure you save before exiting the app for any reason. 
+- App can sometimes crash on returning from multitasking or simply exiting the app to the home menu. Fix is coming at some point, but for now, be sure you save before exiting the app for any reason. 
 
 ## Credits and license
 
