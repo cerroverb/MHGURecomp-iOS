@@ -19,6 +19,10 @@ as in [upstream's README](https://github.com/morerokk/MHGURecomp#readme).
 
 No. If you want that, request it upstream, as morerokk maintains an Android build, and they should build in this one if they are added. I'm not interested in supporting them myself. For phones, I recommend telescopic controllers. Otherwise, any dinput or Switch controllers should work via direct USB connection on all iOS devices, others with Bluetooth. 
 
+# Known issues
+
+-App can sometimes crash on returning from multitasking or simply exiting the app to the home menu. Fix is coming at some point, but for now, be sure you save before exiting the app for any reason. 
+
 ## Credits and license
 
 All credit for MHGU Recomp goes to morerokk and its contributors. The iOS layer builds on
