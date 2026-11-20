@@ -670,6 +670,12 @@ bool plat_use_folder(const char *utf8, char *buf, size_t size) {
     return stat(buf, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+// Paths are UTF-8 already here: copied (as upstream runtime/platform/linux.c does).
+const char *plat_utf8_path(const char *path, char *buf, size_t size) {
+    snprintf(buf, size, "%s", path);
+    return buf;
+}
+
 SDL_Window *ui_window(void);
 
 // The files in a folder and its subfolders (main.c: whether the player's romfs is complete).
