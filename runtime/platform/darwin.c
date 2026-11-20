@@ -676,6 +676,8 @@ const char *plat_utf8_path(const char *path, char *buf, size_t size) {
     return buf;
 }
 
+void plat_x11_display(void *display) { (void)display; }  // (no X11 here, as upstream runtime/platform/windows.c)
+
 SDL_Window *ui_window(void);
 
 // The files in a folder and its subfolders (main.c: whether the player's romfs is complete).
