@@ -676,6 +676,12 @@ const char *plat_utf8_path(const char *path, char *buf, size_t size) {
     return buf;
 }
 
+// Ported from upstream runtime/platform/linux.c (0.18.1): a link is not a plain entry (lstat, no following).
+bool plat_plain_entry(const char *path, bool dir) {
+    struct stat st;
+    return lstat(path, &st) == 0 && (dir ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
+}
+
 void plat_x11_display(void *display) { (void)display; }  // (no X11 here, as upstream runtime/platform/windows.c)
 
 SDL_Window *ui_window(void);
