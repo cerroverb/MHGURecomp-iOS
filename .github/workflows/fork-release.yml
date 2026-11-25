@@ -287,7 +287,7 @@ jobs:
           echo "repaired: $changed"
           if echo "$changed" | grep -qE '^(generated|tools|\.github)/'; then echo "::error::The repair changed protected files"; exit 1; fi
           git diff
-          git add -u && git commit -q -m "Repair the build for $UP (Claude Code)"
+          git add -u && git commit -q -m "Repair the build for $UP"
           bash -e "$RUNNER_TEMP/build.sh"
 
       - name: Save game code objects
