@@ -136,7 +136,10 @@ static void create_instance(void) {
         validate = false;
         r = vkCreateInstance(&ci, NULL, &g_vk.inst);
     }
-    if (r != VK_SUCCESS) FATAL("vkCreateInstance: %d (is a Vulkan 1.1 driver installed?)\n", r);
+    if (r != VK_SUCCESS) {
+        rt_blame(EXIT_CANT_START);
+        FATAL("vkCreateInstance: %d (is a Vulkan 1.1 driver installed?)\n", r);
+    }
     if (validate) {
         PFN_vkCreateDebugUtilsMessengerEXT f =
             (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(g_vk.inst, "vkCreateDebugUtilsMessengerEXT");
@@ -162,13 +165,16 @@ static void no_vulkan(const char *why) {
     LOG("[vk] %s (Vulkan 1.1 required)\n", why);
     plat_error_box("This device's GPU driver does not support Vulkan 1.1, which the game needs. A system or GPU driver "
                    "update may help.");
-    exit(1);
+    rt_exit(EXIT_CANT_START);
 }
 
 static void pick_device(void) {
     uint32_t n = 0;
     vkEnumeratePhysicalDevices(g_vk.inst, &n, NULL);
-    if (!n) FATAL("no Vulkan device\n");
+    if (!n) {
+        rt_blame(EXIT_CANT_START);
+        FATAL("no Vulkan device\n");
+    }
     VkPhysicalDevice *pd = calloc(n, sizeof *pd);
     vkEnumeratePhysicalDevices(g_vk.inst, &n, pd);
     int want = getenv("MHGU_GPU") ? atoi(getenv("MHGU_GPU")) : -1, best = -1, best_score = -100;
@@ -1145,7 +1151,7 @@ static void exit_handler(void) {
     engine_modules_shutdown();  // (its own atexit handler was registered before this one, so it would never run)
     fflush(stdout);
     fflush(stderr);
-    _exit(0);
+    _exit(rt_exit_status());  // (rt_exit's code: exit()'s own status never reaches here)
 }
 
 // The window's Vulkan surface. On Apple's systems it is a Metal view + CAMetalLayer that SDL adds to the window, which
